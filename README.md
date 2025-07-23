@@ -16,7 +16,6 @@
 | **Embedding Search**         | Semantic retrieval of most relevant content                           |
 | **Frontend Interface**       | Simple chat UI using React or Streamlit                               |
 | **Audit Logs**               | Track queries, responses, and citations for compliance                |
-| **Error Handling**           | Graceful degradation (fallback to generic response if pipeline fails) |
 
 
 🛠️ Tech Stack Breakdown
@@ -28,8 +27,10 @@
 | **Embeddings**  | `BAAI/bge-small-en` or `nomic-embed-text` (compact & accurate)    |
 | **Vector DB**   | `FAISS` (local dev), `Weaviate` or `Pinecone` for cloud           |
 | **RAG**         | `LangChain` or `LlamaIndex`                                       |
-| **Backend**     | `FastAPI`                                                         |
-| **Frontend**    | `React` (for long-term value), `Streamlit` (for fast prototyping) |
+| **Frontend**    | `Streamlit` (for fast prototyping)                                |
 | **Deployment**  | `Docker`, `NGINX`, `RunPod` / `AWS EC2`                           |
-| **Monitoring**  | `LangSmith`, or custom logging middleware                         |
+
+
+
+
 
