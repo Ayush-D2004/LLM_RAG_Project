@@ -12,7 +12,7 @@ langchain-ollama>=0.1.0
 ollama>=0.1.7
 
 # Document loaders
-PyPDF2>=3.0.1
+pypdf
 pdfminer.six>=20221105
 
 # Text preprocessing
