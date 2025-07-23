@@ -1,0 +1,39 @@
+# Byte-compiled / cache files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Virtual environment
+venv/
+env/
+llmvenv/
+
+# VS Code / PyCharm settings
+.vscode/
+.idea/
+
+# macOS / Windows hidden files
+.DS_Store
+Thumbs.db
+
+# Logs and temporary files
+*.log
+*.tmp
+*.swp
+
+# Local data and indexes (if auto-generated)
+index/
+*.faiss
+*.pkl
+
+# Environment variables
+.env
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Output files (optional)
+output/
