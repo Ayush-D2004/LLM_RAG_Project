@@ -22,7 +22,7 @@
 
 | Layer           | Tool / Framework                                                  |
 | --------------- | ----------------------------------------------------------------- |
-| **LLM**         | `LLaMA 3 8B` or `Mistral 7B` via Hugging Face                     |
+| **LLM**         | `LLaMA 3 8B` for local and `Gemini` for web app                   |
 | **Fine-Tuning** | `QLoRA` + `PEFT` + `LoRA`, using Hugging Face Transformers        |
 | **Embeddings**  | `BAAI/bge-small-en` or `nomic-embed-text` (compact & accurate)    |
 | **Vector DB**   | `FAISS` (local dev), `Weaviate` or `Pinecone` for cloud           |
