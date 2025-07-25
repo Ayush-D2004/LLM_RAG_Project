@@ -1,16 +1,17 @@
-# langchain 
-# langchain-community 
-# langchain-huggingface 
-# transformers 
-# torch 
-# sentence-transformers 
-# faiss-cpu 
-# unstructured[all] 
-# pypdf 
-# fastapi 
-# uvicorn 
-# python-multipart 
-# python-dotenv 
-# huggingface_hub
-# ollama
-# pydantic
+langchain 
+langchain-community 
+langchain-huggingface 
+transformers 
+torch 
+sentence-transformers 
+faiss-cpu 
+unstructured[all] 
+pypdf 
+fastapi 
+uvicorn 
+python-multipart 
+python-dotenv 
+huggingface_hub
+ollama
+pydantic
+google-generativeai

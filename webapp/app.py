@@ -6,15 +6,14 @@ import logging
 import random
 import shutil
 from ingest import process_pdfs_for_file
-from qa_pipeline import load_all_indexes
+from qa_pipeline import load_vectorstore, get_top_k_context, query_gemini
+import google.generativeai as genai
+from dotenv import load_dotenv
+load_dotenv()
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
 import warnings
-warnings.filterwarnings("ignore")
-
-if st.session_state.get("should_rerun", False):
-    st.session_state.should_rerun = False
-    st.rerun()
-
+warnings.filterwarnings("ignore") 
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(
@@ -329,6 +328,9 @@ with st.sidebar:
     # Optional: force reprocessing toggle
     force_reprocess = st.checkbox("🔁 Force reprocess documents", value=False)
 
+    # Debug info toggle
+    show_debug = st.checkbox("Show debug info", value=True)
+
     # File uploader comes first!
     uploaded_files = st.file_uploader(
         "Upload company documents",
@@ -337,73 +339,104 @@ with st.sidebar:
         label_visibility="collapsed"
     )
 
-    # Track processed files per session to avoid duplicate work
-    if "processed_files" not in st.session_state:
+    # Ensure processed_files is a set
+    if "processed_files" not in st.session_state or not isinstance(st.session_state.processed_files, set):
         st.session_state.processed_files = set()
 
-    # Upload handler
+    # --- AUTO-INDEXING: Always scan data/ for PDFs and process if needed ---
+    data_dir = "data"
+    index_dir = "index"
+    os.makedirs(data_dir, exist_ok=True)
+    os.makedirs(index_dir, exist_ok=True)
+    debug_msgs = []
+    # Process any new uploads
     if uploaded_files:
-        data_dir = "data"
-        os.makedirs(data_dir, exist_ok=True)
-        os.makedirs("index", exist_ok=True)
-
-        saved_files = []
-        processed_files = []
-        skipped_files = []
-        errors = []
-
-        with st.spinner("🧠 Uploading and processing documents..."):
-            for uploaded_file in uploaded_files:
-                safe_filename = uploaded_file.name.replace(" ", "_")
-                file_path = os.path.join(data_dir, safe_filename)
-                index_name = os.path.splitext(safe_filename)[0]
-                index_path = os.path.join("index", index_name)
-
-                # Skip reprocessing in the current session
-                if safe_filename in st.session_state.processed_files:
-                    continue
-
+        for uploaded_file in uploaded_files:
+            safe_filename = uploaded_file.name.replace(" ", "_")
+            file_path = os.path.join(data_dir, safe_filename)
+            if not os.path.exists(file_path):
+                with open(file_path, "wb") as f:
+                    f.write(uploaded_file.getbuffer())
+                debug_msgs.append(f"Saved file: {safe_filename}")
+    # Scan data/ for PDFs and process if not indexed or if force_reprocess
+    processed_files = []
+    skipped_files = []
+    errors = []
+    for file_name in os.listdir(data_dir):
+        if file_name.endswith('.pdf'):
+            index_name = os.path.splitext(file_name)[0]
+            index_path = os.path.join(index_dir, index_name)
+            file_path = os.path.join(data_dir, file_name)
+            needs_processing = force_reprocess or not os.path.exists(index_path) or not os.path.exists(os.path.join(index_path, "index.faiss"))
+            if needs_processing:
                 try:
-                    # Save file if not already saved
-                    if not os.path.exists(file_path):
-                        with open(file_path, "wb") as f:
-                            f.write(uploaded_file.getbuffer())
-                        saved_files.append(safe_filename)
-
-                    # Check if index already exists
-                    if not os.path.exists(index_path) or force_reprocess:
-                        process_pdfs_for_file(file_path)
-                        processed_files.append(safe_filename)
-                    else:
-                        logging.info(f"⏩ Skipping '{safe_filename}'; already indexed.")
-                        skipped_files.append(safe_filename)
-
-                    # Track that we've handled it
-                    st.session_state.processed_files.add(safe_filename)
-
+                    process_pdfs_for_file(file_path)
+                    processed_files.append(file_name)
+                    debug_msgs.append(f"Processed file: {file_name}")
                 except Exception as e:
-                    logging.error(f"Error processing {safe_filename}: {e}")
-                    errors.append(safe_filename)
-
-            if processed_files or force_reprocess:
+                    errors.append(file_name)
+                    debug_msgs.append(f"Error processing {file_name}: {e}")
+            else:
+                skipped_files.append(file_name)
+                debug_msgs.append(f"Skipped file (already indexed): {file_name}")
+            st.session_state.processed_files.add(file_name)
+    # After processing, always try to load the vectorstore
+    try:
+        st.session_state.db = load_vectorstore(index_dir)
+        st.session_state.processed = True
+        debug_msgs.append("Vectorstore loaded successfully.")
+        num_indexes = len(st.session_state.db)
+        num_docs = 0
+        for db in st.session_state.db:
+            try:
+                num_docs += db.index.ntotal
+            except Exception:
+                pass
+        debug_msgs.append(f"Loaded {num_indexes} index(es), total {num_docs} documents.")
+    except Exception as e:
+        st.session_state.db = None
+        st.session_state.processed = False
+        debug_msgs.append(f"Failed to load vectorstore: {e}")
+    # Toasts
+    if processed_files:
+        show_toast(f"✅ Processed {len(processed_files)} new document(s).", "success")
+    if skipped_files:
+        show_toast(f"ℹ️ Skipped {len(skipped_files)} already-processed document(s).", "warning")
+    if errors:
+        show_toast(f"❌ Failed to process: {', '.join(errors)}", "error")
+    # Show debug messages in sidebar for troubleshooting
+    if show_debug:
+        st.sidebar.markdown("### 🐞 Debug Info")
+        for msg in debug_msgs:
+            st.sidebar.markdown(f"- {msg}")
+        # Add a debug section to show session state for troubleshooting
+        st.markdown("---")
+        st.markdown("### 🐞 Session State Debug")
+        # Show actual objects, not stringified
+        st.json({k: v for k, v in st.session_state.items()})
+        # Show number of loaded indexes and total docs if db is loaded
+        if st.session_state.get("db"):
+            num_indexes = len(st.session_state.db)
+            num_docs = 0
+            for db in st.session_state.db:
                 try:
-                    st.session_state.rag_chain = load_all_indexes()
-                    st.session_state.processed = True
-                except Exception as e:
-                    logging.error(f"Failed to load RAG chain: {e}")
-                    show_toast("❌ Failed to load knowledge engine", "error")
-
-        # Toasts
-        if processed_files:
-            show_toast(f"✅ Processed {len(processed_files)} new document(s).", "success")
-        if skipped_files:
-            show_toast(f"ℹ️ Skipped {len(skipped_files)} already-processed document(s).", "warning")
-        if errors:
-            show_toast(f"❌ Failed to process: {', '.join(errors)}", "error")
-
-        st.session_state.should_rerun = True
-
-
+                    num_docs += db.index.ntotal
+                except Exception:
+                    pass
+            st.markdown(f"**Indexes loaded:** {num_indexes}")
+            st.markdown(f"**Total docs in vectorstore:** {num_docs}")
+        # Show contents of data/ and index/ for troubleshooting
+        st.markdown("---")
+        st.markdown("### 📂 Data Directory Contents")
+        try:
+            st.json(os.listdir("data"))
+        except Exception:
+            st.write("data/ directory not found")
+        st.markdown("### 📂 Index Directory Contents")
+        try:
+            st.json({d: os.listdir(os.path.join("index", d)) for d in os.listdir("index")})
+        except Exception:
+            st.write("index/ directory not found")
 
     # Display uploaded files with remove option
     st.markdown("---")
@@ -420,7 +453,6 @@ with st.sidebar:
                 with col1:
                     st.markdown(f"""
                     <div class="file-card">
-                        <button class="remove-btn" onclick="removeFile('{file_name}')">×</button>
                         <p class="file-name">📄 {file_name}</p>
                         <p class="file-size">{format_file_size(file_size)}</p>
                     </div>
@@ -431,7 +463,6 @@ with st.sidebar:
                     if st.button("❌", key=f"remove_{file_name}", help="Remove this document"):
                         if remove_file(file_name):
                             show_toast(f"🗑️ Removed {file_name}", "success")
-                            st.rerun()
                         else:
                             show_toast(f"❌ Failed to remove {file_name}", "error")
         else:
@@ -462,6 +493,38 @@ selected = option_menu(
 if selected == "Assistant":
     st.markdown('<div class="main-header"><h1>🚀 Enterprise Copilot</h1><p>Your AI-powered business assistant</p></div>', unsafe_allow_html=True)
 
+    # Add a debug section to show session state for troubleshooting
+    st.markdown("---")
+    st.markdown("### 🐞 Session State Debug")
+    st.json({k: str(v) for k, v in st.session_state.items()})
+    # Show number of loaded indexes and total docs if db is loaded
+    if st.session_state.get("db"):
+        num_indexes = len(st.session_state.db)
+        num_docs = 0
+        for db in st.session_state.db:
+            try:
+                num_docs += db.index.ntotal
+            except Exception:
+                pass
+        st.markdown(f"**Indexes loaded:** {num_indexes}")
+        st.markdown(f"**Total docs in vectorstore:** {num_docs}")
+    # Show contents of data/ and index/ for troubleshooting
+    st.markdown("---")
+    st.markdown("### 📂 Data Directory Contents")
+    try:
+        st.json(os.listdir("data"))
+    except Exception:
+        st.write("data/ directory not found")
+    st.markdown("### 📂 Index Directory Contents")
+    try:
+        st.json({d: os.listdir(os.path.join("index", d)) for d in os.listdir("index")})
+    except Exception:
+        st.write("index/ directory not found")
+
+    # If db is not loaded, show a clear error
+    if not st.session_state.get("db"):
+        st.warning("Knowledge engine is not loaded. Please upload and process at least one document.")
+
     # Chat display
     chat_placeholder = st.empty()
     with chat_placeholder.container():
@@ -487,12 +550,54 @@ if selected == "Assistant":
         st.markdown('</div>', unsafe_allow_html=True)
 
     # Chat input
-    if prompt := st.chat_input("💬 Ask me anything about your documents..."):
-        if st.session_state.rag_chain:
+    if prompt := st.chat_input("💬 Ask me anything about your documents...", key="user_chat_input"):
+        if st.session_state.processed:
             st.session_state.messages.append({"role": "user", "content": prompt})
-            st.rerun()
+
+            # Trigger assistant response immediately
+            thinking_placeholder = st.empty()
+            thinking_placeholder.markdown("""
+            <div class="thinking-animation">
+                <span class="chat-icon">🚀</span>
+                <span>Enterprise Copilot is analyzing...</span>
+            </div>
+            """, unsafe_allow_html=True)
+
+            try:
+                context_string, source_docs = get_top_k_context(prompt, st.session_state.db)
+                if not context_string.strip():
+                    warning_msg = "I couldn't find relevant information in the documents."
+                    st.session_state.messages.append({"role": "assistant", "content": warning_msg})
+                    thinking_placeholder.empty()
+                else:
+                    full_response = query_gemini(context_string, prompt)
+                    if not full_response or not full_response.strip():
+                        full_response = "❌ No response generated by the AI model."
+                    logging.info(f"User prompt received: {prompt}")
+                    logging.info(f"Context string: {context_string}")
+                    logging.info(f"Full response: {full_response}")
+                    logging.info(f"Source documents: {source_docs}")
+
+                    full_response += "\n\n---\n**Sources:**\n"
+                    unique_sources = set()
+                    for d in source_docs:
+                        file = os.path.basename(d.metadata.get("source", "Unknown"))
+                        page = d.metadata.get("page", "?")
+                        unique_sources.add(f"- `{file}`, Page {page}")
+
+                    full_response += "\n".join(sorted(list(unique_sources)))
+                    st.session_state.messages.append({"role": "assistant", "content": full_response})
+                    thinking_placeholder.empty()
+            except Exception as e:
+                logging.error(f"Answer generation error: {e}")
+                error_msg = f"An error occurred while generating the answer: {str(e)}"
+                st.session_state.messages.append({"role": "assistant", "content": error_msg})
+                show_toast("❌ Failed to get answer", "error")
+                thinking_placeholder.empty()
         else:
             show_toast("⚠️ Please process your documents first!", "warning")
+
+    
 
 # --- DASHBOARD PAGE ---
 elif selected == "Dashboard":
@@ -539,43 +644,3 @@ elif selected == "Dashboard":
                 <div style="font-weight:600;">{tech}</div>
             </div>
             """, unsafe_allow_html=True)
-
-# --- RAG RESPONSE HANDLING ---
-if (selected == "Assistant" and 
-    st.session_state.messages and 
-    st.session_state.messages[-1]["role"] == "user" and 
-    st.session_state.rag_chain):
-    
-    prompt = st.session_state.messages[-1]["content"]
-    thinking_placeholder = st.empty()
-    thinking_placeholder.markdown("""
-    <div class="thinking-animation">
-        <span class="chat-icon">🚀</span>
-        <span>Enterprise Copilot is analyzing...</span>
-    </div>
-    """, unsafe_allow_html=True)
-
-    try:
-        response = st.session_state.rag_chain.invoke({"query": prompt})
-        full_response = response.get('result', "I couldn't generate a response based on the documents.")
-
-        sources = response.get('source_documents', [])
-        if sources:
-            unique_sources = list(set(d.metadata.get("source", "Unknown") for d in sources))
-            if unique_sources:
-                source_text = "\n\n---\n**Sources:**\n"
-                for doc_path in unique_sources:
-                    source_text += f"- `{os.path.basename(doc_path)}`\n"
-                full_response += source_text
-
-        st.session_state.messages.append({"role": "assistant", "content": full_response})
-        thinking_placeholder.empty()
-        st.rerun()
-
-    except Exception as e:
-        logging.error(f"Answer generation error: {e}")
-        error_msg = f"Error getting answer: {str(e)}"
-        st.session_state.messages.append({"role": "assistant", "content": error_msg})
-        thinking_placeholder.empty()
-        show_toast("❌ Failed to get answer", "error")
-        st.rerun()
