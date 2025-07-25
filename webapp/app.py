@@ -183,8 +183,8 @@ def load_css():
         /* Toast notifications */
         .toast {
             position: fixed;
-            top: 20px;
-            right: 20px;
+            bottom: 30px;
+            right: 30px;
             padding: 15px 25px;
             border-radius: 8px;
             color: white;
@@ -341,68 +341,73 @@ with st.sidebar:
     if "processed_files" not in st.session_state:
         st.session_state.processed_files = set()
 
-    # Upload handler
-    if uploaded_files:
-        data_dir = "data"
-        os.makedirs(data_dir, exist_ok=True)
-        os.makedirs("index", exist_ok=True)
+    data_dir = "data"
+    index_dir = "index"
+    os.makedirs(data_dir, exist_ok=True)
+    os.makedirs(index_dir, exist_ok=True)
 
+    # --- AUTO-LOAD RAG CHAIN IF INDEXES EXIST ---
+    def has_valid_indexes():
+        for name in os.listdir(index_dir):
+            dir_path = os.path.join(index_dir, name)
+            if os.path.isdir(dir_path):
+                if os.path.exists(os.path.join(dir_path, "index.faiss")) and os.path.exists(os.path.join(dir_path, "index.pkl")):
+                    return True
+        return False
+
+    # Only process files if uploaded or force_reprocess, else just load if indexes exist
+    need_processing = uploaded_files or force_reprocess
+    if need_processing:
         saved_files = []
         processed_files = []
         skipped_files = []
         errors = []
-
         with st.spinner("🧠 Uploading and processing documents..."):
-            for uploaded_file in uploaded_files:
-                safe_filename = uploaded_file.name.replace(" ", "_")
-                file_path = os.path.join(data_dir, safe_filename)
-                index_name = os.path.splitext(safe_filename)[0]
-                index_path = os.path.join("index", index_name)
-
-                # Skip reprocessing in the current session
-                if safe_filename in st.session_state.processed_files:
-                    continue
-
-                try:
-                    # Save file if not already saved
-                    if not os.path.exists(file_path):
-                        with open(file_path, "wb") as f:
-                            f.write(uploaded_file.getbuffer())
-                        saved_files.append(safe_filename)
-
-                    # Check if index already exists
-                    if not os.path.exists(index_path) or force_reprocess:
-                        process_pdfs_for_file(file_path)
-                        processed_files.append(safe_filename)
-                    else:
-                        logging.info(f"⏩ Skipping '{safe_filename}'; already indexed.")
-                        skipped_files.append(safe_filename)
-
-                    # Track that we've handled it
-                    st.session_state.processed_files.add(safe_filename)
-
-                except Exception as e:
-                    logging.error(f"Error processing {safe_filename}: {e}")
-                    errors.append(safe_filename)
-
-            if processed_files or force_reprocess:
-                try:
-                    st.session_state.rag_chain = load_all_indexes()
-                    st.session_state.processed = True
-                except Exception as e:
-                    logging.error(f"Failed to load RAG chain: {e}")
-                    show_toast("❌ Failed to load knowledge engine", "error")
-
-        # Toasts
+            if uploaded_files:
+                for uploaded_file in uploaded_files:
+                    safe_filename = uploaded_file.name.replace(" ", "_")
+                    file_path = os.path.join(data_dir, safe_filename)
+                    index_name = os.path.splitext(safe_filename)[0]
+                    index_path = os.path.join(index_dir, index_name)
+                    if safe_filename in st.session_state.processed_files:
+                        continue
+                    try:
+                        if not os.path.exists(file_path):
+                            with open(file_path, "wb") as f:
+                                f.write(uploaded_file.getbuffer())
+                            saved_files.append(safe_filename)
+                        if not os.path.exists(index_path) or force_reprocess:
+                            process_pdfs_for_file(file_path)
+                            processed_files.append(safe_filename)
+                        else:
+                            logging.info(f"⏩ Skipping '{safe_filename}'; already indexed.")
+                            skipped_files.append(safe_filename)
+                        st.session_state.processed_files.add(safe_filename)
+                    except Exception as e:
+                        logging.error(f"Error processing {safe_filename}: {e}")
+                        errors.append(safe_filename)
+            # After processing, always reload the RAG chain
+            try:
+                st.session_state.rag_chain = load_all_indexes()
+                st.session_state.processed = True
+            except Exception as e:
+                logging.error(f"Failed to load RAG chain: {e}")
+                show_toast("❌ Failed to load knowledge engine", "error")
         if processed_files:
             show_toast(f"✅ Processed {len(processed_files)} new document(s).", "success")
         if skipped_files:
             show_toast(f"ℹ️ Skipped {len(skipped_files)} already-processed document(s).", "warning")
         if errors:
             show_toast(f"❌ Failed to process: {', '.join(errors)}", "error")
-
         st.session_state.should_rerun = True
-
+    elif has_valid_indexes() and not st.session_state.get("rag_chain"):
+        # If indexes exist and rag_chain not loaded, load it
+        try:
+            st.session_state.rag_chain = load_all_indexes()
+            st.session_state.processed = True
+        except Exception as e:
+            logging.error(f"Failed to load RAG chain: {e}")
+            show_toast("❌ Failed to load knowledge engine", "error")
 
 
     # Display uploaded files with remove option
@@ -557,6 +562,9 @@ if (selected == "Assistant" and
 
     try:
         response = st.session_state.rag_chain.invoke({"query": prompt})
+        # Log the full response for debugging
+        # logging.info(f"Gemini chain raw response: {response}")
+        st.sidebar.markdown(f"**Gemini chain raw response:** {response}")
         full_response = response.get('result', "I couldn't generate a response based on the documents.")
 
         sources = response.get('source_documents', [])
@@ -574,8 +582,11 @@ if (selected == "Assistant" and
 
     except Exception as e:
         logging.error(f"Answer generation error: {e}")
-        error_msg = f"Error getting answer: {str(e)}"
+        import traceback
+        tb = traceback.format_exc()
+        error_msg = f"Error getting answer: {str(e)}\nTraceback:\n{tb}"
         st.session_state.messages.append({"role": "assistant", "content": error_msg})
         thinking_placeholder.empty()
         show_toast("❌ Failed to get answer", "error")
+        st.sidebar.markdown(f"**Gemini error:** {error_msg}")
         st.rerun()

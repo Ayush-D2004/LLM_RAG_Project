@@ -1,10 +1,15 @@
 
 import os
+import google.generativeai as genai
 from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_community.llms import Ollama
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
+from langchain_google_genai import ChatGoogleGenerativeAI
+from dotenv import load_dotenv
+load_dotenv()
+
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
 INDEX_DIR = "index"
 
@@ -19,7 +24,7 @@ Guidelines:
 - Be brief and to the point while explaining to the user.
 - Always end with a question asking to follow up.
 - If user greets you then make a polite greetings and ask how can I help you.
-
+- Always be descriptive and detailed in your answers.
 Use the context below to answer the question. Cite sources using the format (Source: filename.pdf, page X).
 
 Context: {context}
@@ -30,7 +35,6 @@ Answer:
 """)
 
 def load_all_indexes():
-    """Load all FAISS indexes from the index directory."""
     embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
     dbs = []
 
@@ -53,7 +57,7 @@ def load_all_indexes():
         merged_db.merge_from(db)
 
     retriever = merged_db.as_retriever(search_kwargs={"k": 4})
-    llm = Ollama(model="llama3")
+    llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro", google_api_key=os.getenv("GEMINI_API_KEY"))
 
     qa_chain = RetrievalQA.from_chain_type(
         llm=llm,

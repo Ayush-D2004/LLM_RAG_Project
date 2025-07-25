@@ -1,5 +1,6 @@
 # ✅ ingest.py (refactored)
 import os
+import logging
 from langchain_community.document_loaders import PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
@@ -35,6 +36,8 @@ def embed_and_save(chunks, name):
 def process_pdfs_for_file(pdf_path):
     filename = os.path.basename(pdf_path)
     name = filename.replace(" ", "_").replace(".pdf", "")
+    logging.info(f"Processing file: {filename}")
     docs = load_documents(pdf_path)
     chunks = split_documents(docs, name)
     embed_and_save(chunks, name)
+    logging.info(f"Finished processing file: {filename}")
