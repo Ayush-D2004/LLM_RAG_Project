@@ -28,3 +28,7 @@ watchdog>=4.0.0
 
 # Optional: For file encoding handling (future-proofing)
 chardet>=5.2.0
+
+# google
+google.generativeai
+langchain-google-genai
