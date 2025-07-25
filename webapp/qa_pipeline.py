@@ -9,6 +9,10 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from dotenv import load_dotenv
 load_dotenv()
 
+import os
+from huggingface_hub import login
+login(token=os.getenv("HUGGINGFACEHUB_API_TOKEN"))
+
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
 INDEX_DIR = "index"
