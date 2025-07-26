@@ -278,7 +278,7 @@ def get_stats():
     """Get processing statistics"""
     data_dir = "data"
     if os.path.exists(data_dir):
-        files = [f for f in os.listdir(data_dir) if f.endswith('.pdf')]
+        files = [f for f in os.listdir(data_dir) if f.endswith('.pdf','.docx','.txt')]
         return len(files)
     return 0
 
@@ -332,7 +332,7 @@ with st.sidebar:
     # File uploader comes first!
     uploaded_files = st.file_uploader(
         "Upload company documents",
-        type="pdf",
+        type=["pdf", "docx", "txt"],
         accept_multiple_files=True,
         label_visibility="collapsed"
     )
@@ -415,7 +415,7 @@ with st.sidebar:
     st.header("📄 Uploaded Documents")
     data_dir = "data"
     if os.path.exists(data_dir):
-        files = [f for f in os.listdir(data_dir) if f.endswith('.pdf')]
+        files = [f for f in os.listdir(data_dir) if f.endswith((".pdf", ".docx", ".txt"))]
         if files:
             for file_name in files:
                 file_path = os.path.join(data_dir, file_name)

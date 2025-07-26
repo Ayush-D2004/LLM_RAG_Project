@@ -1,4 +1,4 @@
-from langchain_community.document_loaders import PyPDFLoader
+from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, TextLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -12,10 +12,18 @@ from logger import logging
 DATA_DIR = "data"
 OUTPUT_ROOT = "index"
 
-def load_documents(pdf_path):
-    loader = PyPDFLoader(pdf_path)
+def load_documents(file_path):
+    ext = os.path.splitext(file_path)[1].lower()
+    if ext == ".pdf":
+        loader = PyPDFLoader(file_path)
+    elif ext == ".docx":
+        loader = Docx2txtLoader(file_path)
+    elif ext == ".txt":
+        loader = TextLoader(file_path)
+    else:
+        raise ValueError(f"Unsupported file type: {ext}")
     documents = loader.load()
-    logging.info(f"Loaded {len(documents)} pages from '{os.path.basename(pdf_path)}'.")
+    logging.info(f"Loaded {len(documents)} pages from '{os.path.basename(file_path)}'.")
     return documents
 
 def split_documents(docs, filename):
@@ -46,17 +54,18 @@ def embed_and_save(chunks, pdf_filename):
 
 if __name__ == "__main__":
     os.makedirs(OUTPUT_ROOT, exist_ok=True)
-    pdf_files = [f for f in os.listdir(DATA_DIR) if f.endswith(".pdf")]
+    supported_exts = [".pdf", ".docx", ".txt"]
+    data_files = [f for f in os.listdir(DATA_DIR) if os.path.splitext(f)[1].lower() in supported_exts]
 
-    if not pdf_files:
-        raise FileNotFoundError("No PDF files found in 'data' directory.")
+    if not data_files:
+        raise FileNotFoundError("No supported files (.pdf, .docx, .txt) found in 'data' directory.")
 
-    logging.info(f"Found {len(pdf_files)} PDF(s) in '{DATA_DIR}'.\n")
+    logging.info(f"Found {len(data_files)} supported file(s) in '{DATA_DIR}'.\n")
 
-    for pdf_file in pdf_files:
-        path = os.path.join(DATA_DIR, pdf_file)
+    for data_file in data_files:
+        path = os.path.join(DATA_DIR, data_file)
         docs = load_documents(path)
-        chunks = split_documents(docs, pdf_file)
-        embed_and_save(chunks, pdf_file)
+        chunks = split_documents(docs, data_file)
+        embed_and_save(chunks, data_file)
     
     logging.info("Ingest.py completed with no errors.")
