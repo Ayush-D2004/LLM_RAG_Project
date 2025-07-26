@@ -1,18 +1,32 @@
 # ✅ ingest.py (refactored)
 import os
-from langchain_community.document_loaders import PyPDFLoader
+import logging
+from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, TextLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
+from huggingface_hub import login
+from dotenv import load_dotenv
+load_dotenv()
+
+login(token=os.getenv("HUGGINGFACEHUB_API_TOKEN"))
 
 DATA_DIR = "data"
 INDEX_DIR = "index"
 
 
-def load_documents(pdf_path):
-    loader = PyPDFLoader(pdf_path)
+def load_documents(file_path):
+    ext = os.path.splitext(file_path)[1].lower()
+    if ext == ".pdf":
+        loader = PyPDFLoader(file_path)
+    elif ext == ".docx":
+        loader = Docx2txtLoader(file_path)
+    elif ext == ".txt":
+        loader = TextLoader(file_path)
+    else:
+        raise ValueError(f"Unsupported file type: {ext}")
     docs = loader.load()
-    print(f"📄 Loaded {len(docs)} pages from '{pdf_path}'.")
+    print(f"📄 Loaded {len(docs)} pages from '{file_path}'.")
     return docs
 
 
@@ -35,6 +49,8 @@ def embed_and_save(chunks, name):
 def process_pdfs_for_file(pdf_path):
     filename = os.path.basename(pdf_path)
     name = filename.replace(" ", "_").replace(".pdf", "")
+    logging.info(f"Processing file: {filename}")
     docs = load_documents(pdf_path)
     chunks = split_documents(docs, name)
     embed_and_save(chunks, name)
+    logging.info(f"Finished processing file: {filename}")
